@@ -83,7 +83,7 @@ const PRList = ({ repos }) => {
                   {pr.analysis ? (
                     <div className="mt-2">
                       <h5 className="font-bold">Analysis:</h5>
-                      <p>{pr.analysis.substring(0, 100)}...</p>
+                      <p>{pr.analysis}</p>
                       <Link href={`/analysis/${pr.id}`} className="text-blue-500 hover:underline">
                         View full analysis
                       </Link>

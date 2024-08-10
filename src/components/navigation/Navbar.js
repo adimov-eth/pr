@@ -9,7 +9,7 @@ const Navbar = () => {
   const { data: session, status } = useSession();
 
   return (
-    <nav className="bg-white shadow-lg">
+    <nav className="shadow-lg">
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex justify-between h-16">
           <div className="flex">

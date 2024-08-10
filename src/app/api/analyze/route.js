@@ -4,17 +4,8 @@ import { authOptions } from '../auth/[...nextauth]/route';
 import { getOctokit } from '@/lib/github';
 import openai from '@/lib/openai';
 import { supabase } from '@/lib/supabase';
-import kv from '@/lib/kv';
 import { handleApiError } from '@/utils/apiUtils';
 import { z } from 'zod';
-import corsMiddleware from '@/utils/cors';
-
-import rateLimit from '@/utils/rateLimiter';
-
-const limiter = rateLimit({
-  interval: 60 * 1000, // 60 seconds
-  uniqueTokenPerInterval: 500, // Max 500 users per second
-});
 
 const analyzeSchema = z.object({
   repoName: z.string(),
@@ -23,13 +14,25 @@ const analyzeSchema = z.object({
 
 export async function POST(request) {
   try {
-    await corsMiddleware(request);
 
-    try {
-      await limiter.check(NextResponse, 10, 'ANALYZE_TOKEN'); // 10 requests per minute
-    } catch {
-      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
-    }
+    const headers = new Headers({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        });
+
+    if (request.method === 'OPTIONS') {
+        return new NextResponse(null, { headers });
+        }
+
+  
+    
+
+    // try {
+    //   await limiter.check(NextResponse, 10, 'ANALYZE_TOKEN'); // 10 requests per minute
+    // } catch {
+    //   return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+    // }
 
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -40,11 +43,11 @@ export async function POST(request) {
     const { repoName, prNumber } = analyzeSchema.parse(body);
 
     const cacheKey = `analysis:${repoName}:${prNumber}`;
-    const cachedAnalysis = await kv.get(cacheKey);
+    // const cachedAnalysis = await kv.get(cacheKey);
 
-    if (cachedAnalysis) {
-      return NextResponse.json({ analysisResult: cachedAnalysis });
-    }
+    // if (cachedAnalysis) {
+    //   return NextResponse.json({ analysisResult: cachedAnalysis });
+    // }
 
     // Fetch PR details from GitHub
     const octokit = getOctokit(session.accessToken);
@@ -81,25 +84,44 @@ export async function POST(request) {
 
     const analysisResult = completion.choices[0].message.content;
 
-    // Store the analysis result in Supabase
-    const { data, error } = await supabase
-      .from('pull_requests')
-      .update({
-        analysis_result: analysisResult,
-        analyzed_at: new Date().toISOString(),
-      })
-      .match({ repo_name: repoName, pr_number: prNumber });
+    console.log('Attempting to save analysis result:', { repoName, prNumber, analysisResult });
 
-    if (error) {
-      console.error('Error updating analysis result:', error);
-      return NextResponse.json({ error: 'Failed to store analysis result' }, { status: 500 });
-    }
+     // First, try to update the existing record
+     const { data, error } = await supabase
+     .from('pull_requests')
+     .update({
+       analysis_result: analysisResult,
+       analyzed_at: new Date().toISOString(),
+     })
+     .match({ repo_name: repoName, pr_number: prNumber });
 
-    // Cache the analysis result for 1 hour
-    await kv.set(cacheKey, analysisResult, { ex: 3600 });
+   if (error) {
+     console.error('Error updating analysis result:', error);
+     return NextResponse.json({ error: 'Failed to store analysis result' }, { status: 500 });
+   }
 
-    return NextResponse.json({ analysisResult });
-  } catch (error) {
-    return handleApiError(NextResponse, error);
-  }
+   // If no rows were affected by the update, insert a new record
+   if (data && data.length === 0) {
+     console.log('No existing record found. Inserting new record.');
+     const { data: insertData, error: insertError } = await supabase
+       .from('pull_requests')
+       .insert({
+         repo_name: repoName,
+         pr_number: prNumber,
+         analysis_result: analysisResult,
+         analyzed_at: new Date().toISOString(),
+       });
+
+     if (insertError) {
+       console.error('Error inserting new analysis result:', insertError);
+       return NextResponse.json({ error: 'Failed to store analysis result' }, { status: 500 });
+     }
+   }
+
+   console.log('Analysis result saved successfully');
+
+   return NextResponse.json({ analysisResult });
+ } catch (error) {
+   return handleApiError(NextResponse, error);
+ }
 }
