@@ -1,0 +1,893 @@
+
+
+--- ./.eslintrc.json ---
+
+{
+  "extends": "next/core-web-vitals"
+}
+
+
+--- ./.prettierrc.js ---
+
+// .prettierrc.js
+module.exports = {
+  // Specify the line length that the printer will wrap on
+  printWidth: 100,
+
+  // Specify the number of spaces per indentation-level
+  tabWidth: 2,
+
+  // Use spaces instead of tabs
+  useTabs: false,
+
+  // Use semicolons at the end of statements
+  semi: true,
+
+  // Use single quotes instead of double quotes
+  singleQuote: true,
+
+  // Change when properties in objects are quoted
+  quoteProps: 'as-needed',
+
+  // Use single quotes instead of double quotes in JSX
+  jsxSingleQuote: false,
+
+  // Print trailing commas wherever possible in multi-line comma-separated syntactic structures
+  trailingComma: 'es5',
+
+  // Print spaces between brackets in object literals
+  bracketSpacing: true,
+
+  // Put the > of a multi-line JSX element at the end of the last line instead of being alone on the next line
+  bracketSameLine: false,
+
+  // Include parentheses around a sole arrow function parameter
+  arrowParens: 'always',
+
+  // Format only files recognized by Prettier, leave unknown files untouched
+  requirePragma: false,
+
+  // Insert @format pragma into file's first docblock comment
+  insertPragma: false,
+
+  // Specify the global whitespace sensitivity for HTML, Vue, Angular, and Handlebars
+  htmlWhitespaceSensitivity: 'css',
+
+  // Maintain existing line endings (mixed values within one file are normalized by looking at what's used after the first line)
+  endOfLine: 'lf',
+
+  // Control whether Prettier formats quoted code embedded in the file
+  embeddedLanguageFormatting: 'auto',
+
+  // Enforce single attribute per line in HTML, Vue and JSX
+  singleAttributePerLine: false,
+};
+
+
+--- ./jsconfig.json ---
+
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+
+
+--- ./package.json ---
+
+{
+  "name": "pr",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.1",
+    "@supabase/supabase-js": "^2.45.1",
+    "autoprefixer": "^10.4.20",
+    "next": "14.2.5",
+    "next-auth": "^4.24.7",
+    "openai": "^4.55.4",
+    "react": "^18",
+    "react-dom": "^18",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "eslint": "^8",
+    "eslint-config-next": "14.2.5",
+    "postcss": "^8.4.41",
+    "prettier": "^3.3.3",
+    "tailwindcss": "^3.4.9"
+  },
+  "packageManager": "pnpm@9.1.2+sha1.907f57a52517de34399d66401bf220a549e47b57"
+}
+
+
+--- ./src/app/analysis/[id]/page.js ---
+
+'use client';
+
+import { useParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+
+const AnalysisPage = () => {
+  const params = useParams();
+  const { id } = params;
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchAnalysis = async () => {
+      if (id) {
+        try {
+          const { data, error } = await supabase
+            .from('pull_requests')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+          if (error) throw error;
+          setAnalysis(data);
+        } catch (err) {
+          setError('Failed to fetch analysis result');
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchAnalysis();
+  }, [id]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
+  if (!analysis) return <div>No analysis found</div>;
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold mb-4">Analysis Result</h1>
+      <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+        <div className="px-4 py-5 sm:px-6">
+          <h3 className="text-lg leading-6 font-medium text-gray-900">
+            PR #{analysis.pr_number} - {analysis.title}
+          </h3>
+          <p className="mt-1 max-w-2xl text-sm text-gray-500">
+            Repository: {analysis.repo_name}
+          </p>
+        </div>
+        <div className="border-t border-gray-200">
+          <dl>
+            <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+              <dt className="text-sm font-medium text-gray-500">Author</dt>
+              <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                {analysis.author}
+              </dd>
+            </div>
+            <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+              <dt className="text-sm font-medium text-gray-500">Created at</dt>
+              <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                {new Date(analysis.created_at).toLocaleString()}
+              </dd>
+            </div>
+            <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+              <dt className="text-sm font-medium text-gray-500">Analysis Result</dt>
+              <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                <pre className="whitespace-pre-wrap">{analysis.analysis_result}</pre>
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AnalysisPage;
+
+
+--- ./src/app/api/analyze/route.js ---
+
+// src/app/api/analyze/route.js
+
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../auth/[...nextauth]';
+import { getOctokit } from '@/lib/github';
+import openai from '@/lib/openai';
+import { supabase } from '@/lib/supabase';
+import { handleApiError } from '@/utils/apiUtils';
+import { z } from 'zod';
+import corsMiddleware from '@/utils/cors';
+
+import rateLimit from '@/utils/rateLimiter';
+
+const limiter = rateLimit({
+  interval: 60 * 1000, // 60 seconds
+  uniqueTokenPerInterval: 500, // Max 500 users per second
+});
+
+const analyzeSchema = z.object({
+  repoName: z.string(),
+  prNumber: z.number().int().positive(),
+});
+
+export async function POST(request) {
+  try {
+    await corsMiddleware(request);
+
+    try {
+      await limiter.check(NextResponse, 10, 'ANALYZE_TOKEN'); // 10 requests per minute
+    } catch {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+    }
+
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { repoName, prNumber } = analyzeSchema.parse(body);
+
+    // ... rest of the function remains the same
+
+    // Fetch PR details from GitHub
+    const octokit = getOctokit(session.accessToken);
+    const [owner, repo] = repoName.split('/');
+    const { data: pr } = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    // Fetch the PR diff
+    const { data: diff } = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+      mediaType: {
+        format: 'diff',
+      },
+    });
+
+    // Prepare the prompt for OpenAI
+    const prompt = `Analyze the following pull request:
+Title: ${pr.title}
+Description: ${pr.body}
+Files changed:
+${diff}
+
+Provide a brief summary of changes (2-3 sentences), estimate the effort (Low/Medium/High), potential impact on the project (Low/Medium/High), and highlight any red flags or areas needing attention.`;
+
+    // Send to OpenAI for analysis
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const analysisResult = completion.choices[0].message.content;
+
+    // Store the analysis result in Supabase
+    const { data, error } = await supabase
+      .from('pull_requests')
+      .update({
+        analysis_result: analysisResult,
+        analyzed_at: new Date().toISOString(),
+      })
+      .match({ repo_name: repoName, pr_number: prNumber });
+
+    if (error) {
+      console.error('Error updating analysis result:', error);
+      return NextResponse.json({ error: 'Failed to store analysis result' }, { status: 500 });
+    }
+
+    return NextResponse.json({ analysisResult });
+  } catch (error) {
+    return handleApiError(NextResponse, error);
+  }
+}
+
+
+--- ./src/app/api/auth/[...nextauth].js ---
+
+import NextAuth from 'next-auth';
+import GithubProvider from 'next-auth/providers/github';
+
+export default NextAuth({
+  providers: [
+    GithubProvider({
+      clientId: process.env.GITHUB_ID,
+      clientSecret: process.env.GITHUB_SECRET,
+    }),
+  ],
+});
+
+
+--- ./src/app/api/prs/route.js ---
+
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../auth/[...nextauth]';
+import { getOctokit } from '@/lib/github';
+
+export async function GET(request) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const repo = searchParams.get('repo');
+
+  if (!repo) {
+    return NextResponse.json({ error: 'Repository name is required' }, { status: 400 });
+  }
+
+  try {
+    const [owner, repoName] = repo.split('/');
+    const octokit = getOctokit(session.accessToken);
+    const { data } = await octokit.pulls.list({
+      owner,
+      repo: repoName,
+      state: 'open',
+    });
+
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('Error fetching PRs:', error);
+    return NextResponse.json({ error: 'Failed to fetch pull requests' }, { status: 500 });
+  }
+}
+
+
+--- ./src/app/api/webhook/route.js ---
+
+// src/app/api/webhook/route.js
+import { NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
+import crypto from 'crypto';
+
+const verifySignature = (signature, body) => {
+  const hmac = crypto.createHmac('sha256', process.env.WEBHOOK_SECRET);
+  const expectedSignature = `sha256=${hmac.update(body).digest('hex')}`;
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+};
+
+export async function POST(request) {
+  const payload = await request.text();
+  const signature = request.headers.get('X-Hub-Signature-256');
+
+  if (!verifySignature(signature, payload)) {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 403 });
+  }
+
+  const jsonPayload = JSON.parse(payload);
+
+  if (jsonPayload.action === 'opened' || jsonPayload.action === 'synchronize') {
+    const pr = jsonPayload.pull_request;
+    const { data, error } = await supabase.from('pull_requests').upsert(
+      {
+        repo_name: jsonPayload.repository.full_name,
+        pr_number: pr.number,
+        title: pr.title,
+        description: pr.body,
+        author: pr.user.login,
+        created_at: pr.created_at,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'repo_name,pr_number',
+      }
+    );
+
+    if (error) {
+      console.error('Error inserting/updating pull request:', error);
+      return NextResponse.json({ error: 'Failed to process webhook' }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ message: 'Webhook processed successfully' });
+}
+
+
+--- ./src/app/dashboard/page.js ---
+
+// src/app/dashboard/page.js
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../api/auth/[...nextauth]';
+import PRListWrapper from '@/components/PRListWrapper';
+import WebhookInstructions from '@/components/WebhookInstructions';
+import { getOctokit } from '@/lib/github';
+
+export default async function Dashboard() {
+  const session = await getServerSession(authOptions);
+
+  if (!session) {
+    return <div>Please sign in to access the dashboard.</div>;
+  }
+
+  let repos = [];
+  let error = null;
+
+  try {
+    const octokit = getOctokit(session.accessToken);
+    const { data } = await octokit.repos.listForAuthenticatedUser();
+    repos = data;
+  } catch (e) {
+    console.error('Error fetching repos:', e);
+    error = 'Failed to fetch repositories. Please try again later.';
+  }
+
+  return (
+    <div>
+      <h1 className="text-3xl font-bold mb-4">Dashboard</h1>
+      {error ? <p className="text-red-500">{error}</p> : <PRListWrapper initialRepos={repos} />}
+      <WebhookInstructions />
+    </div>
+  );
+}
+
+
+--- ./src/app/globals.css ---
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
+  }
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(to bottom, transparent, rgb(var(--background-end-rgb)))
+    rgb(var(--background-start-rgb));
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+
+--- ./src/app/layout.js ---
+
+// src/app/layout.js
+import '@/app/globals.css';
+import Navbar from '@/components/navigation/Navbar';
+
+export const metadata = {
+  title: 'LLM-based PR Review Tool',
+  description: 'AI-powered service that reviews pull requests and evaluates code contributions',
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        <div className="min-h-screen bg-gray-100">
+          <Navbar />
+          <main className="container mx-auto px-4 py-8">{children}</main>
+        </div>
+      </body>
+    </html>
+  );
+}
+
+
+--- ./src/app/page.js ---
+
+// src/app/page.js
+import Link from 'next/link';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from './api/auth/[...nextauth]';
+
+export default async function Home() {
+  const session = await getServerSession(authOptions);
+
+  return (
+    <div className="text-center">
+      <h1 className="text-4xl font-bold mb-4">Welcome to PR Review Tool</h1>
+      <p className="mb-8">Analyze your pull requests with AI-powered insights</p>
+      {session ? (
+        <Link
+          href="/dashboard"
+          className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
+        >
+          Go to Dashboard
+        </Link>
+      ) : (
+        <p>Sign in to get started!</p>
+      )}
+    </div>
+  );
+}
+
+
+--- ./src/components/PRList.js ---
+
+import React, { useState } from 'react';
+import { useSession } from 'next-auth/react';
+import Link from 'next/link';
+
+const PRList = ({ repos }) => {
+  const { data: session } = useSession();
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [prs, setPRs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchPRs = async (repoName) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/prs?repo=${repoName}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch PRs');
+      }
+      const data = await response.json();
+      setPRs(data);
+      setSelectedRepo(repoName);
+    } catch (error) {
+      console.error('Error fetching PRs:', error);
+      setError('Failed to fetch pull requests. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const analyzePR = async (repoName, prNumber) => {
+    setError(null);
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ repoName, prNumber })
+      });
+      if (!response.ok) {
+        throw new Error('Failed to analyze PR');
+      }
+      const data = await response.json();
+      setPRs(prs.map(pr => 
+        pr.number === prNumber ? { ...pr, analysis: data.analysisResult } : pr
+      ));
+    } catch (error) {
+      console.error('Error analyzing PR:', error);
+      setError('Failed to analyze pull request. Please try again.');
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold mb-4">Select a Repository</h2>
+      <ul className="mb-8">
+        {repos.map((repo) => (
+          <li key={repo.id} className="mb-2">
+            <button
+              onClick={() => fetchPRs(repo.full_name)}
+              className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+            >
+              {repo.name}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {error && <p className="text-red-500 mb-4">{error}</p>}
+
+      {selectedRepo && (
+        <div>
+          <h3 className="text-xl font-bold mb-4">Pull Requests for {selectedRepo}</h3>
+          {loading ? (
+            <p>Loading PRs...</p>
+          ) : (
+            <ul>
+              {prs.map((pr) => (
+                <li key={pr.id} className="mb-4 p-4 border rounded">
+                  <h4 className="font-bold">{pr.title}</h4>
+                  <p>#{pr.number} opened by {pr.user.login}</p>
+                  {pr.analysis ? (
+                    <div className="mt-2">
+                      <h5 className="font-bold">Analysis:</h5>
+                      <p>{pr.analysis.substring(0, 100)}...</p>
+                      <Link href={`/analysis/${pr.id}`} className="text-blue-500 hover:underline">
+                        View full analysis
+                      </Link>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => analyzePR(selectedRepo, pr.number)}
+                      className="mt-2 bg-green-500 hover:bg-green-600 text-white font-bold py-1 px-2 rounded"
+                    >
+                      Analyze
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default PRList;
+
+
+--- ./src/components/PRListWrapper.js ---
+
+// src/components/PRListWrapper.js
+'use client';
+
+import { useState, useEffect } from 'react';
+import PRList from './PRList';
+
+export default function PRListWrapper({ initialRepos }) {
+  const [repos, setRepos] = useState(initialRepos);
+
+  useEffect(() => {
+    setRepos(initialRepos);
+  }, [initialRepos]);
+
+  return <PRList repos={repos} />;
+}
+
+
+--- ./src/components/WebhookInstructions.js ---
+
+// src/components/WebhookInstructions.js
+export default function WebhookInstructions() {
+  return (
+    <div className="bg-white shadow overflow-hidden sm:rounded-md p-6 mt-8">
+      <h2 className="text-2xl font-bold mb-4">Webhook Setup Instructions</h2>
+      <ol className="list-decimal list-inside space-y-2">
+        <li>Go to your repository&apos;s settings on GitHub</li>
+        <li>Click on &quot;Webhooks&quot; in the left sidebar</li>
+        <li>Click &quot;Add webhook&quot;</li>
+        <li>
+          Set Payload URL to:{' '}
+          <code className="bg-gray-100 p-1">{process.env.NEXTAUTH_URL}/api/webhook</code>
+        </li>
+        <li>
+          Set Content type to: <code className="bg-gray-100 p-1">application/json</code>
+        </li>
+        <li>Select &quot;Let me select individual events&quot;</li>
+        <li>Check only the &quot;Pull requests&quot; event</li>
+        <li>Click &quot;Add webhook&quot; to save</li>
+      </ol>
+    </div>
+  );
+}
+
+
+--- ./src/components/layout/Layout.js ---
+
+import React from 'react';
+import Navbar from './Navbar';
+
+const Layout = ({ children }) => {
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <Navbar />
+      <main className="container mx-auto px-4 py-8">{children}</main>
+    </div>
+  );
+};
+
+export default Layout;
+
+
+--- ./src/components/navigation/Navbar.js ---
+
+import React from 'react';
+import Link from 'next/link';
+import { useSession, signIn, signOut } from 'next-auth/react';
+
+const Navbar = () => {
+  const { data: session } = useSession();
+
+  return (
+    <nav className="bg-white shadow-lg">
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex justify-between h-16">
+          <div className="flex">
+            <Link href="/" className="flex-shrink-0 flex items-center">
+              PR Review Tool
+            </Link>
+          </div>
+          <div className="flex items-center">
+            {session ? (
+              <>
+                <span className="text-gray-700 mr-4">{session.user.name}</span>
+                <button
+                  onClick={() => signOut()}
+                  className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => signIn('github')}
+                className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+              >
+                Sign In with GitHub
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+export default Navbar;
+
+
+--- ./src/lib/github.js ---
+
+import { Octokit } from '@octokit/rest';
+
+export const getOctokit = (accessToken) => {
+  return new Octokit({ auth: accessToken });
+};
+
+
+--- ./src/lib/openai.js ---
+
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+export default openai;
+
+
+--- ./src/lib/supabase.js ---
+
+// src/lib/supabase.js
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+
+--- ./src/utils/apiUtils.js ---
+
+// src/utils/apiUtils.js
+export function handleApiError(res, error, statusCode = 500) {
+  console.error(error);
+  return res.status(statusCode).json({ error: error.message || 'An unexpected error occurred' });
+}
+
+
+--- ./src/utils/cors.js ---
+
+// src/utils/cors.js
+import Cors from 'cors';
+
+const cors = Cors({
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+});
+
+function runMiddleware(req, res, fn) {
+  return new Promise((resolve, reject) => {
+    fn(req, res, (result) => {
+      if (result instanceof Error) {
+        return reject(result);
+      }
+      return resolve(result);
+    });
+  });
+}
+
+export default async function corsMiddleware(req, res) {
+  await runMiddleware(req, res, cors);
+}
+
+
+--- ./src/utils/rateLimiter.js ---
+
+// src/utils/rateLimiter.js
+import { LRUCache } from 'lru-cache';
+
+const rateLimit = (options) => {
+  const tokenCache = new LRUCache({
+    max: options.uniqueTokenPerInterval || 500,
+    ttl: options.interval || 60000,
+  });
+
+  return {
+    check: (res, limit, token) =>
+      new Promise((resolve, reject) => {
+        const tokenCount = tokenCache.get(token) || [0];
+        if (tokenCount[0] === 0) {
+          tokenCache.set(token, tokenCount);
+        }
+        tokenCount[0] += 1;
+
+        const currentUsage = tokenCount[0];
+        const isRateLimited = currentUsage >= limit;
+        res.setHeader('X-RateLimit-Limit', limit);
+        res.setHeader('X-RateLimit-Remaining', isRateLimited ? 0 : limit - currentUsage);
+
+        return isRateLimited ? reject() : resolve();
+      }),
+  };
+};
+
+export default rateLimit;
+
+
+--- ./supabase_sql_log.sql ---
+
+CREATE TABLE pull_requests (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  repo_name TEXT,
+  pr_number INT,
+  title TEXT,
+  description TEXT,
+  author TEXT,
+  created_at TIMESTAMP WITH TIME ZONE,
+  analyzed_at TIMESTAMP WITH TIME ZONE,
+  analysis_result JSONB
+);
+
+CREATE INDEX idx_repo_name ON pull_requests(repo_name);
+CREATE INDEX idx_pr_number ON pull_requests(pr_number);
+CREATE INDEX idx_created_at ON pull_requests(created_at);
+
+CREATE TABLE users (
+  id UUID REFERENCES auth.users NOT NULL PRIMARY KEY,
+  github_username TEXT UNIQUE,
+  analysis_credits INT DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  last_login TIMESTAMP WITH TIME ZONE
+);
+
+-- Enable Row Level Security
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+-- Create a policy that allows users to see only their own data
+CREATE POLICY "Users can only access their own data" ON users
+  FOR ALL USING (auth.uid() = id);
+
+CREATE OR REPLACE FUNCTION public.handle_new_user() 
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (id, github_username)
+  VALUES (new.id, new.raw_user_meta_data->>'user_name');
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
