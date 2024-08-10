@@ -91,6 +91,7 @@ module.exports = {
   "dependencies": {
     "@octokit/rest": "^21.0.1",
     "@supabase/supabase-js": "^2.45.1",
+    "@vercel/kv": "^2.0.0",
     "autoprefixer": "^10.4.20",
     "next": "14.2.5",
     "next-auth": "^4.24.7",
@@ -197,14 +198,13 @@ export default AnalysisPage;
 
 --- ./src/app/api/analyze/route.js ---
 
-// src/app/api/analyze/route.js
-
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]';
 import { getOctokit } from '@/lib/github';
 import openai from '@/lib/openai';
 import { supabase } from '@/lib/supabase';
+import kv from '@/lib/kv';
 import { handleApiError } from '@/utils/apiUtils';
 import { z } from 'zod';
 import corsMiddleware from '@/utils/cors';
@@ -239,7 +239,12 @@ export async function POST(request) {
     const body = await request.json();
     const { repoName, prNumber } = analyzeSchema.parse(body);
 
-    // ... rest of the function remains the same
+    const cacheKey = `analysis:${repoName}:${prNumber}`;
+    const cachedAnalysis = await kv.get(cacheKey);
+
+    if (cachedAnalysis) {
+      return NextResponse.json({ analysisResult: cachedAnalysis });
+    }
 
     // Fetch PR details from GitHub
     const octokit = getOctokit(session.accessToken);
@@ -260,14 +265,13 @@ export async function POST(request) {
       },
     });
 
-    // Prepare the prompt for OpenAI
     const prompt = `Analyze the following pull request:
-Title: ${pr.title}
-Description: ${pr.body}
-Files changed:
-${diff}
+    Title: ${pr.title}
+    Description: ${pr.body}
+    Files changed:
+    ${diff}
 
-Provide a brief summary of changes (2-3 sentences), estimate the effort (Low/Medium/High), potential impact on the project (Low/Medium/High), and highlight any red flags or areas needing attention.`;
+    Provide a brief summary of changes (2-3 sentences), estimate the effort (Low/Medium/High), potential impact on the project (Low/Medium/High), and highlight any red flags or areas needing attention.`;
 
     // Send to OpenAI for analysis
     const completion = await openai.chat.completions.create({
@@ -291,6 +295,9 @@ Provide a brief summary of changes (2-3 sentences), estimate the effort (Low/Med
       return NextResponse.json({ error: 'Failed to store analysis result' }, { status: 500 });
     }
 
+    // Cache the analysis result for 1 hour
+    await kv.set(cacheKey, analysisResult, { ex: 3600 });
+
     return NextResponse.json({ analysisResult });
   } catch (error) {
     return handleApiError(NextResponse, error);
@@ -298,19 +305,41 @@ Provide a brief summary of changes (2-3 sentences), estimate the effort (Low/Med
 }
 
 
---- ./src/app/api/auth/[...nextauth].js ---
+--- ./src/app/api/auth/[...nextauth]/route.js ---
 
 import NextAuth from 'next-auth';
 import GithubProvider from 'next-auth/providers/github';
 
-export default NextAuth({
+export const authOptions = {
   providers: [
     GithubProvider({
       clientId: process.env.GITHUB_ID,
       clientSecret: process.env.GITHUB_SECRET,
+      authorization: {
+        params: {
+          scope: 'read:user user:email repo',
+        },
+      },
     }),
   ],
-});
+  callbacks: {
+    async jwt({ token, account }) {
+      if (account) {
+        token.accessToken = account.access_token;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      session.accessToken = token.accessToken;
+      return session;
+    },
+  },
+  debug: process.env.NODE_ENV === 'development',
+};
+
+const handler = NextAuth(authOptions);
+
+export { handler as GET, handler as POST };
 
 
 --- ./src/app/api/prs/route.js ---
@@ -319,35 +348,46 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]';
 import { getOctokit } from '@/lib/github';
+import kv from '@/lib/kv';
 
 export async function GET(request) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  
+    const { searchParams } = new URL(request.url);
+    const repo = searchParams.get('repo');
+  
+    if (!repo) {
+      return NextResponse.json({ error: 'Repository name is required' }, { status: 400 });
+    }
+  
+    const cacheKey = `prs:${repo}`;
+    const cachedData = await kv.get(cacheKey);
+  
+    if (cachedData) {
+      return NextResponse.json(cachedData);
+    }
+  
+    try {
+      const [owner, repoName] = repo.split('/');
+      const octokit = getOctokit(session.accessToken);
+      const { data } = await octokit.pulls.list({
+        owner,
+        repo: repoName,
+        state: 'open',
+      });
+  
+      // Cache the result for 5 minutes
+      await kv.set(cacheKey, data, { ex: 300 });
+  
+      return NextResponse.json(data);
+    } catch (error) {
+      console.error('Error fetching PRs:', error);
+      return NextResponse.json({ error: 'Failed to fetch pull requests' }, { status: 500 });
+    }
   }
-
-  const { searchParams } = new URL(request.url);
-  const repo = searchParams.get('repo');
-
-  if (!repo) {
-    return NextResponse.json({ error: 'Repository name is required' }, { status: 400 });
-  }
-
-  try {
-    const [owner, repoName] = repo.split('/');
-    const octokit = getOctokit(session.accessToken);
-    const { data } = await octokit.pulls.list({
-      owner,
-      repo: repoName,
-      state: 'open',
-    });
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error fetching PRs:', error);
-    return NextResponse.json({ error: 'Failed to fetch pull requests' }, { status: 500 });
-  }
-}
 
 
 --- ./src/app/api/webhook/route.js ---
@@ -402,9 +442,8 @@ export async function POST(request) {
 
 --- ./src/app/dashboard/page.js ---
 
-// src/app/dashboard/page.js
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../api/auth/[...nextauth]';
+import { authOptions } from '../api/auth/[...nextauth]/route';
 import PRListWrapper from '@/components/PRListWrapper';
 import WebhookInstructions from '@/components/WebhookInstructions';
 import { getOctokit } from '@/lib/github';
@@ -420,18 +459,31 @@ export default async function Dashboard() {
   let error = null;
 
   try {
+    if (!session.accessToken) {
+      throw new Error('No GitHub access token found in session. Please try signing out and signing in again.');
+    }
+    
     const octokit = getOctokit(session.accessToken);
     const { data } = await octokit.repos.listForAuthenticatedUser();
     repos = data;
   } catch (e) {
     console.error('Error fetching repos:', e);
-    error = 'Failed to fetch repositories. Please try again later.';
+    error = e.message || 'Failed to fetch repositories. Please try again later.';
   }
 
   return (
     <div>
       <h1 className="text-3xl font-bold mb-4">Dashboard</h1>
-      {error ? <p className="text-red-500">{error}</p> : <PRListWrapper initialRepos={repos} />}
+      {error ? (
+        <div>
+          <p className="text-red-500 mb-4">{error}</p>
+          <button onClick={() => window.location.href = '/api/auth/signout'} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Sign Out and Try Again
+          </button>
+        </div>
+      ) : (
+        <PRListWrapper initialRepos={repos} />
+      )}
       <WebhookInstructions />
     </div>
   );
@@ -440,28 +492,25 @@ export default async function Dashboard() {
 
 --- ./src/app/globals.css ---
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
 
 :root {
   --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --background-rgb: 255, 255, 255;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
+    --background-rgb: 18, 18, 18;
   }
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(to bottom, transparent, rgb(var(--background-end-rgb)))
-    rgb(var(--background-start-rgb));
+  background: rgb(var(--background-rgb));
 }
 
 @layer utilities {
@@ -475,6 +524,9 @@ body {
 
 // src/app/layout.js
 import '@/app/globals.css';
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./api/auth/[...nextauth]/route";
+import SessionProvider from "@/components/SessionProvider";
 import Navbar from '@/components/navigation/Navbar';
 
 export const metadata = {
@@ -482,17 +534,37 @@ export const metadata = {
   description: 'AI-powered service that reviews pull requests and evaluates code contributions',
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  const session = await getServerSession(authOptions);
+
+  console.log('RootLayout - Session:', session);
+
   return (
     <html lang="en">
-      <body>
-        <div className="min-h-screen bg-gray-100">
+      <body className="min-h-screen bg-[rgb(var(--background-rgb))] text-[rgb(var(--foreground-rgb))]">
+        <SessionProvider session={session}>
           <Navbar />
           <main className="container mx-auto px-4 py-8">{children}</main>
-        </div>
+        </SessionProvider>
       </body>
     </html>
   );
+}
+
+
+--- ./src/app/not-found.js ---
+
+// src/app/not-found.js
+import Link from 'next/link'
+ 
+export default function NotFound() {
+  return (
+    <div>
+      <h2>Not Found</h2>
+      <p>Could not find requested resource</p>
+      <Link href="/">Return Home</Link>
+    </div>
+  )
 }
 
 
@@ -501,7 +573,7 @@ export default function RootLayout({ children }) {
 // src/app/page.js
 import Link from 'next/link';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from './api/auth/[...nextauth]';
+import { authOptions } from './api/auth/[...nextauth]/route';
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
@@ -511,10 +583,7 @@ export default async function Home() {
       <h1 className="text-4xl font-bold mb-4">Welcome to PR Review Tool</h1>
       <p className="mb-8">Analyze your pull requests with AI-powered insights</p>
       {session ? (
-        <Link
-          href="/dashboard"
-          className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
-        >
+        <Link href="/dashboard" className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
           Go to Dashboard
         </Link>
       ) : (
@@ -657,6 +726,22 @@ export default function PRListWrapper({ initialRepos }) {
 }
 
 
+--- ./src/components/SessionProvider.js ---
+
+// src/components/SessionProvider.js
+'use client';
+
+import { SessionProvider as NextAuthSessionProvider } from "next-auth/react";
+
+export default function SessionProvider({ children, session }) {
+  return (
+    <NextAuthSessionProvider session={session}>
+      {children}
+    </NextAuthSessionProvider>
+  );
+}
+
+
 --- ./src/components/WebhookInstructions.js ---
 
 // src/components/WebhookInstructions.js
@@ -703,12 +788,15 @@ export default Layout;
 
 --- ./src/components/navigation/Navbar.js ---
 
+// src/components/navigation/Navbar.js
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 import { useSession, signIn, signOut } from 'next-auth/react';
 
 const Navbar = () => {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
 
   return (
     <nav className="bg-white shadow-lg">
@@ -720,7 +808,9 @@ const Navbar = () => {
             </Link>
           </div>
           <div className="flex items-center">
-            {session ? (
+            {status === 'loading' ? (
+              <span>Loading...</span>
+            ) : session ? (
               <>
                 <span className="text-gray-700 mr-4">{session.user.name}</span>
                 <button
@@ -753,8 +843,20 @@ export default Navbar;
 import { Octokit } from '@octokit/rest';
 
 export const getOctokit = (accessToken) => {
+  if (!accessToken) {
+    console.error('No access token provided to getOctokit');
+    throw new Error('Authentication required');
+  }
   return new Octokit({ auth: accessToken });
 };
+
+
+--- ./src/lib/kv.js ---
+
+// src/lib/kv.js
+import { kv } from '@vercel/kv';
+
+export default kv;
 
 
 --- ./src/lib/openai.js ---

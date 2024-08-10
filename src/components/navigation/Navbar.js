@@ -1,9 +1,12 @@
+// src/components/navigation/Navbar.js
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 import { useSession, signIn, signOut } from 'next-auth/react';
 
 const Navbar = () => {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
 
   return (
     <nav className="bg-white shadow-lg">
@@ -15,7 +18,9 @@ const Navbar = () => {
             </Link>
           </div>
           <div className="flex items-center">
-            {session ? (
+            {status === 'loading' ? (
+              <span>Loading...</span>
+            ) : session ? (
               <>
                 <span className="text-gray-700 mr-4">{session.user.name}</span>
                 <button
