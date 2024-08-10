@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../auth/[...nextauth]';
+import { authOptions } from '../auth/[...nextauth]/route';
 import { getOctokit } from '@/lib/github';
 import openai from '@/lib/openai';
 import { supabase } from '@/lib/supabase';
